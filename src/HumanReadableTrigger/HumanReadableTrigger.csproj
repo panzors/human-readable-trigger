@@ -21,8 +21,10 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
-    <!-- Produce a .nupkg on every build so packaging stays verified. -->
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <!-- Publishing is disabled while prototyping. Packaging metadata above
+         stays in place; flip this back to true (and re-enable the CI pack
+         step) when ready to produce/publish packages. -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageOutputPath>$(MSBuildThisFileDirectory)../../artifacts/packages</PackageOutputPath>
   </PropertyGroup>
 
