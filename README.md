@@ -1,50 +1,61 @@
 # HumanReadableTrigger
 
-A .NET class library for parsing human-readable trigger expressions.
+A .NET class library that parses structured, human-readable schedule text into
+a normalized `RunSchedule` for hosted workers.
 
-> **Status:** early prototype. The first piece — the `TriggerTime` parser — is
-> now implemented; more trigger types may follow.
+> **Status:** early prototype.
 
 ## Usage
 
-`TriggerTime` turns a human-readable expression into a concrete
-`DateTimeOffset`. Expressions without their own time-zone information are
-interpreted in the supplied time-zone override (or the local zone when none is
-given), so results are deterministic regardless of where the code runs.
+`RunSchedule.Parse` turns a schedule expression into a normalized object that is
+both **serializable** (hand it to your hosted service) and able to **compute the
+next run(s)** locally. Every schedule is anchored to a concrete wall-clock time
+or a fixed cadence — relative expressions like `tomorrow` or `in 2 hours` are
+intentionally **not** supported.
 
 ```csharp
 using HumanReadableTrigger;
 
 var tz = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 
-var when = new TriggerTime("tomorrow at 9am", tz);
-Console.WriteLine(when.Value); // the resolved instant in the override zone
-Console.WriteLine(when.Utc);   // the same instant in UTC
+var schedule = RunSchedule.Parse("9am every Tuesday", tz);
+
+DateTimeOffset? next = schedule.GetNextRun(DateTimeOffset.UtcNow);
+foreach (var run in schedule.GetUpcoming(DateTimeOffset.UtcNow, 5))
+    Console.WriteLine(run);
+
+string json = schedule.ToJson();           // persist / send to the worker
+var restored = RunSchedule.FromJson(json);  // round-trips losslessly
 
 // Non-throwing variant:
-TriggerTime? maybe = TriggerTime.TryParse("in 30 minutes", tz);
+RunSchedule? maybe = RunSchedule.TryParse("every 2 hours", tz);
 ```
 
-Supported expression forms (case-insensitive):
+### Supported expressions (case-insensitive)
 
-- `now`
-- `in <n> <unit> [<n> <unit> ...]` — e.g. `in 1 hour 30 minutes`
-- `<n> <unit> ago` — e.g. `2 hours ago`
-- `today | tomorrow | yesterday [at] <time>`
-- `[next] <weekday> [at] <time>`
-- a bare time of day such as `9am`, `14:30` or `noon` (resolved to today)
-- an absolute date/time such as `2026-12-25 08:00` or `2026-12-25T08:00:00Z`
+| Form | Example | Meaning |
+|------|---------|---------|
+| Weekly | `9am every Tuesday`, `5pm every Monday and Thursday`, `9am daily` | a time of day on one or more weekdays |
+| Monthly | `5pm every 15th` | a time of day on a day of the month (clamped for short months) |
+| Interval | `every 2 hours`, `every 30 minutes` | a fixed cadence that starts immediately |
+| Interval (bounded) | `every hour between 9am and 1600 Monday Tuesday Thursday` | a cadence confined to business hours and weekdays |
+| Continuous sleep | `continuous sleep 12min`, `sleep 12 minutes between runs` | run, sleep a fixed gap, repeat |
+| Cron (fallback) | `cron: 0 9 * * 2` | a raw cron expression — stored and validated, **not** evaluated by this library |
 
-Time units understood: seconds, minutes, hours, days and weeks (plus common
-abbreviations like `min`, `hr`, `d`, `wk`).
+Times accept `9am`, `5pm`, `1600`, `16:00`, `noon` and `midnight`. Durations
+accept forms like `12min`, `2 hours` and `90m` (seconds, minutes, hours, days,
+weeks, plus common abbreviations).
 
-To make relative expressions deterministic (for example in tests), pass an
-explicit reference instant:
+### Notes on semantics
 
-```csharp
-var reference = new DateTimeOffset(2026, 6, 25, 12, 0, 0, TimeSpan.Zero);
-var when = new TriggerTime("in 5 minutes", tz, reference);
-```
+- **Interval** anchors: a bare `every 2 hours` starts immediately and repeats on
+  that cadence; a bounded `every hour between 9am and 4pm` fires on the hour
+  within the window and rolls to the next allowed day.
+- **`GetNextRun(after)`** returns the next run after `after`. For `cron` it
+  returns `null` (your hosted service evaluates cron itself).
+- All wall-clock fields are interpreted in the supplied `TimeZoneInfo`
+  (default: local), and the resolved `DateTimeOffset` carries the correct
+  (DST-aware) offset.
 
 ## Target frameworks
 
